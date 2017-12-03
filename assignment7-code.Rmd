@@ -1,0 +1,155 @@
+---
+title: "Assignment7-code"
+author: "ys3006"
+date: "November 28, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#upload data
+```{r}
+D1 <- read.csv("online.data.csv")
+install.packages("ggplot2")
+library(ggplot2)
+library(reshape2)
+library(dplyr)
+attach(D1)
+
+# since id and level.up is not numeric, leave out these two columns
+D2 <- dplyr::select(D1, post.test.score:av.assignment.score)
+
+ggplot(melt(D2), aes(x=value)) + facet_wrap( ~variable, scale = "free") + geom_histogram()
+
+View(melt(D2))
+#correlation plot
+library(corrplot)
+correlation <- cor(D2)
+corrplot.mixed(correlation, number.cex = 0.6)
+
+# scatterplot matrix
+pairs(D2)
+
+# Clearly, there is a very strong positive relationship between post test score and the number of messages at 0.94
+# Meanwhile, there exists strong positive relationship between post test score and assignment score, messages and assignment score, post test score and pre test score, pre test score and messages
+```
+
+# Classification Tree
+```{r}
+library(rpart)
+c.tree1 <- rpart(level.up ~ messages + av.assignment.score + post.test.score, method = "class", data = D1)
+
+# CP table
+printcp(c.tree1)
+
+# plot the tree
+post(c.tree1, file = "tree1.ps", title = "levelup")
+
+#Generate a probability value that represents the probability that a student levels up based your classification tree 
+D1$pred <- predict(c.tree1, type="prob")[,2]
+View(D1)
+
+# ROC curve
+install.packages("ROCR")
+library(ROCR)
+
+# plot the curve
+pred.detail <- prediction(D1$pred, D1$level.up)
+plot(performance(pred.detail, "tpr", "fpr"))
+abline(0, 1, lty = 2)
+
+# Calculate the area under the curve(AUC)
+unlist(slot(performance(pred.detail,"auc"), "y.values"))
+
+#Unlist liberates the AUC value from the "performance" object created by ROCR
+```
+
+#Now repeat this process, but using the variables you did not use for the previous model and compare the plots & results of your two models. Which one do you think was the better model? Why?
+```{r}
+c.tree2 <- rpart(level.up ~ pre.test.score + forum.posts, method = "class", data = D1)
+
+# plot the tree
+post(c.tree2, file = "tree2.ps", title = "levelup_model2")
+
+#Generate a probability value that represents the probability that a student levels up based your classification tree 
+D1$pred2 <- predict(c.tree2, type="prob")[,2]
+View(D1)
+
+# ROC curve
+install.packages("ROCR")
+library(ROCR)
+
+# plot the curve
+pred.detail2 <- prediction(D1$pred2, D1$level.up)
+plot(performance(pred.detail2, "tpr", "fpr"))
+abline(0, 1, lty = 2)
+
+# Calculate the area under the curve(AUC)
+unlist(slot(performance(pred.detail2,"auc"), "y.values"))
+
+# Model 1 is better, since the higher AUC value represents more accurate prediction. Model 1 has AUC value=1, meaning the predictions are 100% true; while model two has 0.82 AUC, there is 0.18 area does not predict correctly.
+```
+
+# Thresholds
+```{r}
+#Look at the ROC plot for your first model. Based on this plot choose a probability threshold that balances capturing the most correct predictions against false positives. Then generate a new variable in your data set that classifies each student according to your chosen threshold.
+
+#Given 1st model has perfect prediction rate at 100%, using the second model for thresholds instead.
+
+D1$threshold.pred1 <- ifelse(D1$pred2>0.6, 1, 0)
+T1 <- as.data.frame(table(level.up, threshold.pred1))
+
+T1$diag <- ifelse(T1$level.up == "yes" & T1$threshold.pred1 == 1, "True Positive", ifelse(T1$level.up == "yes" & T1$threshold.pred1 == 0, "False Negative", ifelse(T1$level.up == "no" & T1$threshold.pred1 == 1, "False Positive", "True Negative")))
+
+#Now generate three diagnostics:
+(D1$accuracy.model2 <- (468+315)/sum(T1[,3]))
+
+(D1$precision.model2 <- 315/(315+132))
+
+(D1$recall.model2 <- 315/(315+85))
+
+#Finally, calculate Kappa for your model according to:
+
+#First generate the table of comparisons
+table1 <- table(D1$level.up, D1$threshold.pred1)
+
+#Convert to matrix
+matrix1 <- as.matrix(table1)
+
+#Calculate kappa
+kappa(matrix1, exact = TRUE)/kappa(matrix1)
+```
+
+#Now choose a different threshold value and repeat these diagnostics. What conclusions can you draw about your two thresholds?
+```{r}
+D1$threshold.pred2 <- ifelse(D1$pred2>0.7, 1, 0)
+attach(D1)
+T2 <- as.data.frame(table(level.up, threshold.pred2))
+
+T2$diag <- ifelse(T2$level.up == "yes" & T2$threshold.pred2 == 1, "True Positive", ifelse(T2$level.up == "yes" & T2$threshold.pred2 == 0, "False Negative", ifelse(T2$level.up == "no" & T2$threshold.pred2 == 1, "False Positive", "True Negative")))
+T2
+#Now generate three diagnostics:
+(D1$accuracy.model2_2 <- (483+288)/sum(T2[,3]))
+
+(D1$precision.model2_2 <- 288/(288+117))
+
+(D1$recall.model2_2 <- 288/(288+112))
+
+#Finally, calculate Kappa for your model according to:
+#First generate the table of comparisons
+table2 <- table(D1$level.up, D1$threshold.pred2)
+
+#Convert to matrix
+matrix2 <- as.matrix(table2)
+
+#Calculate kappa
+kappa(matrix2, exact = TRUE)/kappa(matrix2)
+```
+
+```{r}
+C = data.frame("threshold" = c(0.6,0.7), "accuracy" = c(0.783, 0.771), "precision" = c(0.704698, 0.711111), "recall" = c(0.7875, 0.72))
+
+# From data frame C comparing three diagnostic rates for threshold 0.6 and 0.7 for the second model, we can see that threshold 0.6 has both higher accuracy and recall, whereas threshold 0.7 has higher precision. Since the precision for both thresholds do not differ a lot, we have evidence to believe that threshold 0.6 performs better under the second model.
+```
